@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Jejak — Demo Pelacak Aktivitas dengan Peta Gratis</title>
+<meta name="description" content="Demo aplikasi pelacak aktivitas ala Strava memakai stack peta 100% gratis tanpa API key: MapLibre GL JS, OpenFreeMap, OSRM, Open-Meteo." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📍</text></svg>" />
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:rgba(13,18,25,.88); --line:#1e2a36;
+    --txt:#eaf2ff; --muted:#8ea3b8; --acc:#2ee6a8; --acc2:#ff5c7a; --blue:#4ea1ff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font-family:"Segoe UI",Inter,system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  #map{position:absolute;inset:0}
+
+  #panel{
+    position:absolute;top:0;left:0;height:100%;width:352px;z-index:5;
+    background:var(--panel);backdrop-filter:blur(14px);
+    border-right:1px solid var(--line);
+    display:flex;flex-direction:column;overflow-y:auto;
+  }
+  #panel::-webkit-scrollbar{width:8px}
+  #panel::-webkit-scrollbar-thumb{background:#26333f;border-radius:8px}
+
+  .head{padding:16px 16px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);backdrop-filter:blur(14px);z-index:2}
+  .brand{display:flex;align-items:center;gap:10px}
+  .logo{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--acc),#12b57f);color:#04221a;font-weight:800;font-size:18px}
+  h1{margin:0;font-size:16px;letter-spacing:.2px}
+  .sub{margin:2px 0 0;font-size:11.5px;color:var(--muted)}
+
+  .sec{padding:14px 16px;border-bottom:1px solid var(--line)}
+  .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:0 0 9px;font-weight:700}
+
+  .seg{display:flex;gap:6px;background:#101822;border:1px solid var(--line);border-radius:10px;padding:4px}
+  .seg button{flex:1;background:transparent;border:0;color:var(--muted);font:600 12.5px inherit;
+    padding:8px 6px;border-radius:7px;cursor:pointer;transition:.15s}
+  .seg button.on{background:#1c2836;color:var(--txt)}
+  .seg button:hover{color:var(--txt)}
+
+  .btns{display:grid;gap:8px;margin-top:12px}
+  button.act{border:1px solid var(--line);background:#121b26;color:var(--txt);
+    padding:11px 12px;border-radius:10px;font:600 13px inherit;cursor:pointer;text-align:left;
+    display:flex;align-items:center;gap:9px;transition:.15s}
+  button.act:hover{background:#182534;border-color:#2b3d4f}
+  button.act:disabled{opacity:.45;cursor:not-allowed}
+  button.act .k{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+  button.rec .k{background:var(--acc2)}
+  button.stop .k{background:#ffb020}
+  button.demo .k{background:var(--blue)}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:2px}
+  .cell{background:#0e141d;padding:10px 11px}
+  .cell .v{font-size:19px;font-weight:700;letter-spacing:.3px;font-variant-numeric:tabular-nums}
+  .cell .v small{font-size:11px;color:var(--muted);font-weight:600;margin-left:2px}
+  .cell .k2{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-top:3px}
+
+  canvas{width:100%;height:104px;display:block;background:#0e141d;border:1px solid var(--line);border-radius:12px}
+
+  .splits{font-size:12.5px}
+  .split{display:grid;grid-template-columns:38px 1fr auto;gap:8px;align-items:center;padding:5px 0;
+    border-bottom:1px dashed #172231}
+  .split:last-child{border-bottom:0}
+  .split .bar{height:6px;border-radius:4px;background:linear-gradient(90deg,var(--acc),#0f8f66)}
+  .split .t{font-variant-numeric:tabular-nums;color:var(--txt)}
+
+  .acts{display:grid;gap:7px}
+  .actcard{border:1px solid var(--line);background:#0e141d;border-radius:10px;padding:9px 10px;cursor:pointer;transition:.15s}
+  .actcard:hover{border-color:#2b3d4f;background:#131c27}
+  .actcard .t1{font-size:12.5px;font-weight:700}
+  .actcard .t2{font-size:11px;color:var(--muted);margin-top:2px}
+  .empty{font-size:12px;color:var(--muted)}
+
+  footer{padding:14px 16px 22px;font-size:11px;color:var(--muted);line-height:1.6;margin-top:auto}
+  footer b{color:#b9cadd;font-weight:600}
+  footer a{color:var(--blue);text-decoration:none}
+
+  #mapBadge{position:absolute;right:12px;bottom:12px;z-index:4;background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;padding:7px 11px;font-size:11px;color:var(--muted);
+    backdrop-filter:blur(12px)}
+  #mapBadge b{color:var(--txt);font-weight:600}
+
+  #live{position:absolute;left:368px;top:14px;z-index:4;display:none;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;
+    backdrop-filter:blur(12px);font-variant-numeric:tabular-nums}
+  #live .big{font-size:24px;font-weight:800}
+  #live .sm{font-size:11px;color:var(--muted)}
+  #live.on{display:block}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--acc2);
+    margin-right:6px;animation:p 1.1s infinite}
+  @keyframes p{0%,100%{opacity:1}50%{opacity:.25}}
+
+  #toast{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);z-index:9;
+    background:#182534;border:1px solid #2b3d4f;border-radius:10px;padding:10px 16px;font-size:12.5px;
+    opacity:0;transition:.25s;pointer-events:none;max-width:80%}
+  #toast.on{opacity:1}
+
+  .maplibregl-ctrl-attrib{font-size:10px}
+
+  @media (max-width:880px){
+    #panel{top:auto;bottom:0;height:56%;width:100%;border-right:0;border-top:1px solid var(--line);
+      border-radius:16px 16px 0 0}
+    #live{left:12px;top:12px}
+    #mapBadge{display:none}
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<aside id="panel">
+  <div class="head">
+    <div class="brand">
+      <div class="logo">J</div>
+      <div>
+        <h1>Jejak</h1>
+        <p class="sub">Demo pelacak aktivitas ala Strava — peta gratis, tanpa API key</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <p class="lbl">Mode olahraga</p>
+    <div class="seg" id="seg">
+      <button data-mode="ride" class="on">🚴 Gowes</button>
+      <button data-mode="run">🏃 Lari</button>
+    </div>
+
+    <div class="btns">
+      <button class="act rec" id="btnRec"><span class="k"></span> Mulai rekam (GPS asli)</button>
+      <button class="act stop" id="btnStop" disabled><span class="k"></span> Stop &amp; simpan</button>
+      <button class="act demo" id="btnDemo"><span class="k"></span> Putar contoh rute</button>
+    </div>
+  </div>
+
+  <div class="sec">
+    <p class="lbl">Statistik sesi <span id="sessionName" style="color:var(--txt);text-transform:none;letter-spacing:0"></span></p>
+    <div class="grid">
+      <div class="cell"><div class="v" id="sDist">0.00<small>km</small></div><div class="k2">Jarak</div></div>
+      <div class="cell"><div class="v" id="sTime">00:00</div><div class="k2">Durasi</div></div>
+      <div class="cell"><div class="v" id="sPace">–</div><div class="k2" id="sPaceLbl">Pace rata-rata</div></div>
+      <div class="cell"><div class="v" id="sElev">0<small>m</small></div><div class="k2">Elevasi naik</div></div>
+      <div class="cell"><div class="v" id="sMax">0.0<small>km/j</small></div><div class="k2">Kecepatan maks</div></div>
+      <div class="cell"><div class="v" id="sKcal">0</div><div class="k2">Estimasi kalori</div></div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <p class="lbl">Profil elevasi</p>
+    <canvas id="chart" width="640" height="208"></canvas>
+  </div>
+
+  <div class="sec">
+    <p class="lbl">Split per kilometer</p>
+    <div class="splits" id="splits"><div class="empty">Belum ada data. Mulai rekam atau putar contoh rute.</div></div>
+  </div>
+
+  <div class="sec">
+    <p class="lbl">Aktivitas tersimpan</p>
+    <div class="acts" id="acts"><div class="empty">Belum ada aktivitas tersimpan.</div></div>
+  </div>
+
+  <footer>
+    <b>Stack 100% gratis, tanpa API key:</b><br />
+    Peta vektor: <b>MapLibre GL JS</b> + tile <b>OpenFreeMap</b> · Geometri rute: <b>OSRM</b> ·
+    Elevasi: <b>Open-Meteo</b> · Data peta: © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors.<br />
+    Demo ini hanya menyimpan data di <b>localStorage</b> browser kamu.
+  </footer>
+</aside>
+
+<div id="live">
+  <div class="sm"><span class="dot"></span>MEREKAM</div>
+  <div class="big" id="lvDist">0.00 km</div>
+  <div class="sm" id="lvTime">00:00 · 0.0 km/j</div>
+</div>
+
+<div id="mapBadge">Zoom <b id="zl">13</b> · <b id="cl">–6.8600, 107.6200</b></div>
+<div id="toast"></div>
+
+<script>
+/* ============================================================
+   JEJAK — demo pelacak aktivitas ala Strava
+   Peta: MapLibre GL JS + OpenFreeMap (gratis, tanpa API key)
+   Rute contoh: geometri asli dari OSRM (router.project-osrm.org)
+   Elevasi: Open-Meteo Elevation API (gratis, tanpa API key)
+   ============================================================ */
+
+const SAMPLES = {"bandung-punclut":{"name":"Gowes Punclut — Bandung","points":[[107.62109,-6.86727,880],[107.62075,-6.86756,880],[107.62065,-6.86806,880],[107.62061,-6.86775,880],[107.6208,-6.86702,881],[107.62092,-6.86673,880],[107.62061,-6.86588,867],[107.62082,-6.86513,837],[107.62074,-6.86461,833],[107.62069,-6.86426,833],[107.62073,-6.864,852],[107.62062,-6.86375,852],[107.61969,-6.86354,859],[107.61913,-6.86341,873],[107.61886,-6.86308,885],[107.61887,-6.86252,885],[107.61865,-6.8623,894],[107.6182,-6.86209,887],[107.61753,-6.86174,887],[107.61677,-6.86134,898],[107.61619,-6.86099,893],[107.6162,-6.86061,889],[107.61656,-6.85992,895],[107.61791,-6.85757,937],[107.61816,-6.85708,943],[107.61848,-6.8565,948],[107.6186,-6.856,948],[107.61858,-6.85558,962],[107.61843,-6.85497,975],[107.61822,-6.85426,978],[107.61809,-6.85376,986],[107.61796,-6.85326,998],[107.61783,-6.85264,998],[107.61763,-6.85141,1007],[107.61759,-6.85116,1007],[107.61749,-6.85052,1018],[107.61737,-6.84995,1045],[107.61706,-6.84937,1045],[107.61685,-6.84914,1049],[107.61621,-6.84937,1041],[107.61528,-6.85018,1040],[107.61462,-6.85072,1024],[107.61447,-6.85047,1024],[107.61453,-6.85018,1024],[107.61477,-6.84991,994],[107.61507,-6.84967,1014],[107.61541,-6.84948,1014],[107.61568,-6.84908,1006],[107.61578,-6.84932,1014],[107.61621,-6.84937,1041],[107.61685,-6.84914,1049],[107.61737,-6.84995,1045],[107.61749,-6.85052,1018],[107.61757,-6.85103,1007],[107.61763,-6.85141,1007],[107.61783,-6.85264,998],[107.61796,-6.85326,998],[107.61809,-6.85376,986],[107.61822,-6.85426,978],[107.61843,-6.85497,975],[107.61858,-6.85558,962],[107.6186,-6.856,948],[107.61848,-6.8565,948],[107.61816,-6.85708,943],[107.61791,-6.85757,937],[107.61656,-6.85992,895],[107.6162,-6.86061,889],[107.61619,-6.86099,893],[107.61659,-6.86124,893],[107.61745,-6.8617,891],[107.61784,-6.8619,887],[107.61838,-6.86218,894],[107.61871,-6.86235,894],[107.61883,-6.86298,885],[107.61897,-6.86332,885],[107.61969,-6.86354,859],[107.62054,-6.86371,852],[107.62073,-6.86394,852],[107.62069,-6.86426,833],[107.62077,-6.86487,833],[107.62082,-6.86511,837],[107.6206,-6.86573,837],[107.62103,-6.86642,869],[107.62117,-6.866,869],[107.62133,-6.86572,846],[107.62168,-6.86554,855],[107.6222,-6.86523,855],[107.62255,-6.86503,870],[107.62304,-6.86471,842],[107.62341,-6.86451,862],[107.62369,-6.86445,862],[107.62387,-6.86439,862],[107.62403,-6.86405,852],[107.6242,-6.86382,882],[107.62458,-6.86353,882],[107.6249,-6.86332,860],[107.62516,-6.86324,872],[107.62544,-6.86326,872],[107.62583,-6.86335,897],[107.62618,-6.86363,897],[107.62637,-6.86384,897],[107.62643,-6.86413,897],[107.62673,-6.86371,909],[107.62688,-6.86346,909],[107.6271,-6.86332,900],[107.62744,-6.86319,900],[107.62785,-6.86307,907],[107.62812,-6.86303,907],[107.62838,-6.86306,914],[107.62874,-6.86314,914],[107.62907,-6.86308,914],[107.62937,-6.86296,923],[107.62973,-6.86271,923],[107.63034,-6.86235,932],[107.63086,-6.86202,951],[107.63124,-6.86187,951],[107.63274,-6.86156,958],[107.63313,-6.86146,958],[107.63359,-6.86131,977],[107.63398,-6.86113,977],[107.63434,-6.86093,989],[107.63508,-6.86047,984],[107.63533,-6.86028,984],[107.63555,-6.86006,984],[107.6358,-6.85979,964],[107.63636,-6.85921,977],[107.63665,-6.85893,991],[107.63696,-6.85875,991],[107.63771,-6.85872,1006],[107.63799,-6.85867,1006],[107.63838,-6.85837,1006],[107.63859,-6.85817,1020],[107.63898,-6.85776,1020],[107.63926,-6.85739,1013],[107.63948,-6.85696,1013],[107.63967,-6.85669,1013],[107.63991,-6.85648,1016],[107.64012,-6.85643,1025],[107.64041,-6.85659,1025],[107.64065,-6.85656,1025],[107.64092,-6.85643,1021],[107.64115,-6.85625,1021],[107.64138,-6.85613,1021],[107.64169,-6.85602,1006],[107.6421,-6.85578,1021],[107.64244,-6.85549,1021],[107.64267,-6.85541,995],[107.64309,-6.8557,995],[107.64331,-6.85579,995],[107.64376,-6.85546,1004],[107.644,-6.8553,1004],[107.64414,-6.85535,1004],[107.64419,-6.8557,1011],[107.64413,-6.85636,996],[107.64399,-6.85689,977],[107.64384,-6.85749,977],[107.6442,-6.8576,991],[107.64443,-6.8574,1000],[107.64428,-6.85759,991],[107.644,-6.85753,976],[107.64392,-6.85716,977],[107.64405,-6.85668,977],[107.64419,-6.8557,1011],[107.64414,-6.85535,1004],[107.64401,-6.85529,1004],[107.64339,-6.85575,1004],[107.64316,-6.85576,995],[107.64288,-6.8555,995],[107.64261,-6.85542,995],[107.64226,-6.85564,1021],[107.64191,-6.85591,1006],[107.64155,-6.85608,1021],[107.64132,-6.85617,1021],[107.64106,-6.85634,1021],[107.64087,-6.85646,1021],[107.64057,-6.8566,1025],[107.64033,-6.85655,1025],[107.64012,-6.85643,1025],[107.63982,-6.85653,1016],[107.63958,-6.8568,1013],[107.63939,-6.85711,1013],[107.63904,-6.8577,1020],[107.63877,-6.85797,1020],[107.63851,-6.85825,1020],[107.63823,-6.85851,1006],[107.63799,-6.85867,1006],[107.63771,-6.85872,1006],[107.63723,-6.8587,991],[107.63684,-6.8588,991],[107.63652,-6.85905,971],[107.63609,-6.85947,977],[107.63568,-6.85993,964],[107.63546,-6.86016,984],[107.63522,-6.86037,984],[107.63461,-6.86078,969],[107.63415,-6.86103,989],[107.6338,-6.86122,977],[107.63353,-6.86132,977],[107.63287,-6.86153,958],[107.63124,-6.86187,951],[107.63086,-6.86202,951],[107.63034,-6.86235,932],[107.62973,-6.86271,923],[107.62944,-6.8629,923],[107.62907,-6.86308,914],[107.62877,-6.86314,914],[107.62838,-6.86306,914],[107.62812,-6.86303,907],[107.62764,-6.86313,907],[107.62727,-6.86325,900],[107.62696,-6.86339,909],[107.62679,-6.8636,909],[107.62663,-6.86402,897],[107.62642,-6.86401,897],[107.62634,-6.86379,897],[107.62595,-6.86344,897],[107.62544,-6.86326,872],[107.62521,-6.86323,872],[107.62496,-6.86329,860],[107.62465,-6.86348,882],[107.62433,-6.86371,882],[107.62414,-6.86388,852],[107.62394,-6.86423,862],[107.62386,-6.8644,862],[107.62362,-6.86446,862],[107.62341,-6.86451,862],[107.62304,-6.86471,842],[107.62255,-6.86503,870],[107.6222,-6.86523,855],[107.62168,-6.86554,855],[107.62138,-6.86568,846],[107.62121,-6.8659,869],[107.62103,-6.86642,869],[107.62094,-6.8667,880],[107.62124,-6.86696,880],[107.62112,-6.86728,880],[107.62109,-6.86727,880]]}};
+
+const R = 6371000;
+const rad = d => d * Math.PI / 180;
+function haversine(a, b){
+  const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
+  const h = Math.sin(dLat/2)**2 + Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+function fmtDur(s){
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), x = s%60;
+  const p = n => String(n).padStart(2,'0');
+  return h ? `${h}:${p(m)}:${p(x)}` : `${p(m)}:${p(x)}`;
+}
+function fmtPace(secPerKm){
+  if(!isFinite(secPerKm) || secPerKm<=0) return '–';
+  const m = Math.floor(secPerKm/60), s = Math.round(secPerKm%60);
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+function toast(msg, ms=2600){
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('on');
+  clearTimeout(el._t); el._t = setTimeout(()=>el.classList.remove('on'), ms);
+}
+
+/* ---------------- MAP ---------------- */
+const map = new maplibregl.Map({
+  container: 'map',
+  style: 'https://tiles.openfreemap.org/styles/dark',
+  center: [107.6205, -6.8600],
+  zoom: 12.7,
+  pitch: 45,
+  bearing: -18,
+  attributionControl: { compact: true }
+});
+map.addControl(new maplibregl.NavigationControl({ visualizePitch:true }), 'top-right');
+map.addControl(new maplibregl.ScaleControl({ maxWidth:110, unit:'metric' }), 'bottom-right');
+map.on('zoom', ()=> document.getElementById('zl').textContent = map.getZoom().toFixed(1));
+map.on('move', ()=>{
+  const c = map.getCenter();
+  document.getElementById('cl').textContent = `${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}`;
+});
+
+/* Style cadangan: raster OpenStreetMap — dipakai kalau tile vektor gagal/lambat */
+const RASTER_STYLE = {
+  version: 8,
+  sources: {
+    osm: {
+      type: 'raster', tileSize: 256,
+      tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+              'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+              'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      attribution: '© OpenStreetMap contributors'
+    }
+  },
+  layers: [
+    { id:'bg', type:'background', paint:{ 'background-color':'#0b0f14' } },
+    { id:'osm', type:'raster', source:'osm', paint:{ 'raster-opacity':.9 } }
+  ]
+};
+
+let layersReady = false, booted = false, usedFallback = false;
+
+function initLayers(){
+  if(layersReady) return;
+  try{
+    map.addSource('route', { type:'geojson', data:{type:'FeatureCollection',features:[]} });
+    map.addLayer({
+      id:'route-casing', type:'line', source:'route',
+      layout:{ 'line-cap':'round', 'line-join':'round' },
+      paint:{ 'line-color':'#000', 'line-opacity':.45, 'line-width':['interpolate',['linear'],['zoom'],10,5,16,14] }
+    });
+    map.addLayer({
+      id:'route-line', type:'line', source:'route',
+      layout:{ 'line-cap':'round', 'line-join':'round' },
+      paint:{
+        'line-width':['interpolate',['linear'],['zoom'],10,3.2,16,9],
+        'line-color':['interpolate',['linear'],['get','v'],
+          0,'#4ea1ff', 3,'#2ee6a8', 5.5,'#f2d13b', 8,'#ff8a3d', 12,'#ff5c7a']
+      }
+    });
+    map.addSource('pts', { type:'geojson', data:{type:'FeatureCollection',features:[]} });
+    map.addLayer({ id:'pts-dot', type:'circle', source:'pts',
+      paint:{ 'circle-radius':['interpolate',['linear'],['zoom'],10,2,16,4.5], 'circle-color':'#ffffff', 'circle-opacity':.55 }});
+    map.addLayer({ id:'pts-live', type:'circle', source:'pts', filter:['==',['get','live'],1],
+      paint:{ 'circle-radius':9, 'circle-color':'#ff5c7a', 'circle-stroke-color':'#fff', 'circle-stroke-width':2.5 }});
+    layersReady = true;
+  }catch(err){
+    layersReady = false;
+    console.warn('[jejak] gagal menyiapkan layer:', err.message);
+  }
+  if(layersReady) setTimeout(boot, 40);
+}
+map.on('style.load', initLayers);
+map.on('load', initLayers);
+
+/* Hook debug publik — biar gampang diintip dari console (opsional) */
+window.JEJAK = { map, status: () => ({ ready: layersReady, booted }) };
+
+map.on('error', e=>{
+  const m = (e && e.error && e.error.message) || (e && e.message) || '';
+  if(m) console.warn('[jejak] map error:', m);
+});
+
+/* Jaring pengaman: kalau 9 detik tile vektor belum siap, pindah ke raster OSM */
+setTimeout(()=>{
+  if(!layersReady && !usedFallback){
+    usedFallback = true;
+    toast('Tile vektor lambat dimuat — beralih ke peta raster OpenStreetMap…', 4200);
+    layersReady = false;
+    map.setStyle(RASTER_STYLE);
+  }
+}, 9000);
+
+
+/* ---------------- STATE ---------------- */
+const state = {
+  mode: 'ride',
+  points: [],          // {lon,lat,ele,t}
+  recording: false,
+  playing: false,
+  watchId: null,
+  t0: 0,
+  timer: null,
+  sessionName: 'Sesi baru'
+};
+
+const MODE = {
+  run:  { base: 2.95, kcal: 1.036, label: 'Pace rata-rata', unit: 'min/km' },   // ~10.6 km/j
+  ride: { base: 6.10, kcal: 0.45,  label: 'Kecepatan rata-rata', unit: 'km/j' }
+};
+
+document.getElementById('seg').addEventListener('click', e=>{
+  const b = e.target.closest('button'); if(!b) return;
+  [...e.currentTarget.children].forEach(x=>x.classList.toggle('on', x===b));
+  state.mode = b.dataset.mode;
+  updateStats();
+  toast(state.mode === 'run' ? 'Mode lari — pace min/km' : 'Mode gowes — kecepatan km/j');
+});
+
+/* ---------------- CORE COMPUTE ---------------- */
+function smoothElevation(pts){
+  if(pts.length < 4) return pts;
+  const out = pts.map(p=>({...p}));
+  const e = pts.map(p=>p.ele || 0);
+  for(let i=0;i<out.length;i++){
+    let s=0,n=0;
+    for(let j=Math.max(0,i-3); j<=Math.min(pts.length-1,i+3); j++){ s+=e[j]; n++; }
+    out[i].ele = s/n;
+  }
+  return out;
+}
+
+function buildSegments(pts){
+  const feats = [];
+  for(let i=1;i<pts.length;i++){
+    const a = pts[i-1], b = pts[i];
+    const d = haversine(a,b);
+    if(d < 0.4) continue;
+    const dt = Math.max(0.001, (b.t||0) - (a.t||0));
+    const v = d/dt;                            // m/s
+    feats.push({ type:'Feature',
+      properties:{ v: +v.toFixed(3), d: +d.toFixed(1) },
+      geometry:{ type:'LineString', coordinates:[[a.lon,a.lat],[b.lon,b.lat]] } });
+  }
+  return { type:'FeatureCollection', features: feats };
+}
+
+function computeStats(pts){
+  let dist=0, gain=0, vmax=0;
+  for(let i=1;i<pts.length;i++){
+    const d = haversine(pts[i-1], pts[i]);
+    dist += d;
+    const dh = (pts[i].ele||0) - (pts[i-1].ele||0);
+    if(dh > 1.2) gain += dh;
+    const dt = (pts[i].t||0) - (pts[i-1].t||0);
+    if(dt > 0.05){ const v = d/dt; if(v > vmax) vmax = v; }
+  }
+  const dur = pts.length>1 ? (pts[pts.length-1].t - pts[0].t) : 0;
+  return { dist, gain, vmax, dur };
+}
+
+function renderRoute(pts){
+  const smooth = smoothElevation(pts);
+  map.getSource('route').setData(buildSegments(smooth));
+  const dots = pts.map((p,i)=>({ type:'Feature',
+      properties:{ i, live: (i===pts.length-1 && (state.recording||state.playing)) ? 1 : 0 },
+      geometry:{ type:'Point', coordinates:[p.lon,p.lat] } }));
+  if(dots.length) dots[0].properties.live = 0;
+  map.getSource('pts').setData({ type:'FeatureCollection', features: dots });
+  return smooth;
+}
+
+/* ---------------- UI RENDER ---------------- */
+let lastSmooth = [];
+function updateStats(){
+  const pts = state.points;
+  const st = computeStats(pts);
+  const M = MODE[state.mode];
+  document.getElementById('sDist').innerHTML = (st.dist/1000).toFixed(2) + '<small>km</small>';
+  document.getElementById('sTime').textContent = fmtDur(st.dur);
+  document.getElementById('sPaceLbl').textContent = M.label;
+  if(state.mode === 'run'){
+    document.getElementById('sPace').innerHTML = st.dist>30 ? fmtPace(st.dur/(st.dist/1000)) + '<small>/km</small>' : '–';
+  }else{
+    document.getElementById('sPace').innerHTML = st.dur>0 ? (st.dist/st.dur*3.6).toFixed(1) + '<small>km/j</small>' : '0.0<small>km/j</small>';
+  }
+  document.getElementById('sElev').innerHTML = Math.round(st.gain) + '<small>m</small>';
+  document.getElementById('sMax').innerHTML = (st.vmax*3.6).toFixed(1) + '<small>km/j</small>';
+  document.getElementById('sKcal').textContent = Math.round((st.dist/1000) * (state.mode==='run'?68:34) * (M.kcal*1.9));
+
+  document.getElementById('lvDist').textContent = (st.dist/1000).toFixed(2) + ' km';
+  document.getElementById('lvTime').textContent = fmtDur(st.dur) + ' · ' +
+     (st.dur>0 ? (st.dist/st.dur*3.6).toFixed(1) : '0.0') + ' km/j';
+
+  lastSmooth = pts.length ? smoothElevation(pts) : [];
+  drawChart(lastSmooth);
+  renderSplits(lastSmooth);
+}
+
+function drawChart(pts){
+  const cv = document.getElementById('chart');
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = '#0e141d'; ctx.fillRect(0,0,W,H);
+  if(pts.length < 3){
+    ctx.fillStyle = '#5c6f83'; ctx.font = '600 20px Segoe UI, sans-serif';
+    ctx.textAlign='center'; ctx.fillText('Belum ada data elevasi', W/2, H/2);
+    return;
+  }
+  const ele = pts.map(p=>p.ele||0);
+  const lo = Math.min(...ele) - 6, hi = Math.max(...ele) + 6;
+  const X = i => i/(pts.length-1) * W;
+  const Y = v => H - 12 - ((v-lo)/(hi-lo)) * (H-34);
+
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'rgba(46,230,168,.55)'); g.addColorStop(1,'rgba(46,230,168,.03)');
+  ctx.beginPath(); ctx.moveTo(0,H);
+  ele.forEach((v,i)=> ctx.lineTo(X(i), Y(v)));
+  ctx.lineTo(W,H); ctx.closePath(); ctx.fillStyle=g; ctx.fill();
+
+  ctx.beginPath();
+  ele.forEach((v,i)=> i ? ctx.lineTo(X(i),Y(v)) : ctx.moveTo(0,Y(v)));
+  ctx.strokeStyle='#2ee6a8'; ctx.lineWidth=3; ctx.lineJoin='round'; ctx.stroke();
+
+  ctx.fillStyle='#8ea3b8'; ctx.font='600 17px Segoe UI, sans-serif'; ctx.textAlign='left';
+  ctx.fillText(Math.round(hi)+' m', 8, 20);
+  ctx.fillText(Math.round(lo)+' m', 8, H-10);
+  ctx.textAlign='right'; ctx.fillText('naik '+Math.round(computeStats(pts).gain)+' m', W-8, 20);
+}
+
+function renderSplits(pts){
+  const el = document.getElementById('splits');
+  if(pts.length < 3){ el.innerHTML = '<div class="empty">Belum ada data.</div>'; return; }
+  const bins = []; let acc = 0, tStart = pts[0].t, tLast = pts[0].t, lastIdx = 0;
+  for(let i=1;i<pts.length;i++){
+    acc += haversine(pts[i-1], pts[i]);
+    if(acc >= 1000){
+      bins.push({ sec: pts[i].t - tStart, gain: gainBetween(pts, lastIdx, i) });
+      tStart = pts[i].t; lastIdx = i; acc = 0;
+    }
+    tLast = pts[i].t;
+  }
+  if(acc > 120) bins.push({ sec: tLast - tStart, gain: gainBetween(pts, lastIdx, pts.length-1), partial: acc });
+  if(!bins.length){ el.innerHTML='<div class="empty">Jarak belum mencapai 1 km.</div>'; return; }
+  const paces = bins.map(b=> b.sec / ((b.partial||1000)/1000));
+  const mx = Math.max(...paces);
+  el.innerHTML = bins.map((b,i)=>{
+    const km = (b.partial||1000)/1000;
+    const secPerKm = b.sec / km;
+    const val = state.mode==='run' ? fmtPace(secPerKm) : (3600/secPerKm).toFixed(1)+' km/j';
+    const w = clamp(100 - (paces[i]/mx)*55, 12, 100);
+    return `<div class="split"><div style="color:#8ea3b8">KM ${i+1}</div>
+      <div class="bar" style="width:${w}%;background:${colorForSpeed(1000/secPerKm)}"></div>
+      <div class="t">${val}</div></div>`;
+  }).join('');
+}
+function gainBetween(pts, a, b){
+  let g=0; for(let i=a+1;i<=b;i++){ const d=(pts[i].ele||0)-(pts[i-1].ele||0); if(d>1.2) g+=d; }
+  return g;
+}
+function colorForSpeed(v){
+  const c = [[0,'#4ea1ff'],[3,'#2ee6a8'],[5.5,'#f2d13b'],[8,'#ff8a3d'],[12,'#ff5c7a']];
+  for(let i=0;i<c.length-1;i++){
+    if(v>=c[i][0] && v<=c[i+1][0]) return c[i][1];
+  }
+  return v<c[0][0] ? c[0][1] : c[c.length-1][1];
+}
+
+/* ---------------- SAMPLE ROUTE PLAYBACK ---------------- */
+function loadSample(key, opts={}){
+  const s = SAMPLES[key];
+  state.points = [];
+  const M = MODE[state.mode];
+  const pts = s.points.map(c=>({ lon:c[0], lat:c[1], ele:c[2] }));
+  // simulasi waktu: kecepatan dipengaruhi gradien (seperti pendakian asli)
+  let t = 0;
+  pts[0].t = 0;
+  for(let i=1;i<pts.length;i++){
+    const d = haversine(pts[i-1], pts[i]);
+    const grad = d>0 ? (pts[i].ele - pts[i-1].ele)/d : 0;
+    const noise = 0.94 + Math.random()*0.13;
+    const v = M.base * clamp(1 - 2.6*grad, 0.42, 1.75) * noise;
+    t += d / Math.max(0.6, v);
+    pts[i].t = t;
+  }
+  state.sessionName = s.name;
+  document.getElementById('sessionName').textContent = '· ' + s.name;
+  renderRoute(pts);
+  if(opts.animate){
+    state.points = [];
+    state.playing = true;
+    document.getElementById('btnRec').disabled = true;
+    document.getElementById('btnDemo').disabled = true;
+    document.getElementById('live').classList.add('on');
+    let i = 0;
+    const step = ()=>{
+      if(!state.playing) return;
+      const batch = Math.max(1, Math.round(pts.length/160));
+      for(let k=0;k<batch && i<pts.length;k++,i++){
+        state.points.push(pts[i]);
+      }
+      renderRoute(state.points);
+      updateStats();
+      const cur = pts[Math.min(i, pts.length-1)];
+      map.easeTo({ center:[cur.lon,cur.lat], duration: 260, bearing: map.getBearing()+0.15 });
+      if(i < pts.length){ setTimeout(step, 42); }
+      else{
+        state.playing = false;
+        document.getElementById('btnRec').disabled = false;
+        document.getElementById('btnDemo').disabled = false;
+        document.getElementById('live').classList.remove('on');
+        toast('Contoh rute selesai diputar — tekan "Stop & simpan" untuk menyimpan.');
+      }
+    };
+    map.fitBounds(boundsOf(pts), { padding: {top:80,bottom:80,left:400,right:80}, pitch:50, duration:1200 });
+    setTimeout(step, 1300);
+  }else{
+    state.points = pts;
+    map.fitBounds(boundsOf(pts), { padding:{top:80,bottom:80,left:400,right:80}, pitch:50, duration:900 });
+    updateStats();
+  }
+}
+function boundsOf(pts){
+  const b = new maplibregl.LngLatBounds();
+  pts.forEach(p=> b.extend([p.lon,p.lat]));
+  return b;
+}
+
+/* ---------------- REAL GPS RECORDING ---------------- */
+function startRecording(){
+  if(!navigator.geolocation){ toast('Browser ini tidak mendukung geolocation.'); return; }
+  state.points = []; state.recording = true; state.sessionName = 'Rekaman langsung';
+  document.getElementById('sessionName').textContent = '· Rekaman langsung';
+  document.getElementById('btnRec').disabled = true;
+  document.getElementById('btnStop').disabled = false;
+  document.getElementById('live').classList.add('on');
+  renderRoute(state.points); updateStats();
+
+  state.watchId = navigator.geolocation.watchPosition(pos=>{
+    const c = pos.coords;
+    const p = { lon:c.longitude, lat:c.latitude, ele:c.altitude!=null?c.altitude:0, t:Date.now()/1000, acc:c.accuracy };
+    if(state.points.length){
+      const last = state.points[state.points.length-1];
+      if(haversine(last,p) < (c.accuracy>25 ? 12 : 4)) return;   // buang noise GPS
+      if(p.t - last.t < 1.2) return;
+    }
+    if(state.points.length === 0) state.t0Start = p.t;
+    state.points.push(p);
+    renderRoute(state.points); updateStats();
+    map.easeTo({ center:[p.lon,p.lat], zoom: Math.max(map.getZoom(), 15.4), duration: 700 });
+  }, err=>{
+    toast('GPS gagal: ' + err.message + ' — pakai contoh rute saja ya.');
+    stopRecording(false);
+  }, { enableHighAccuracy:true, maximumAge:1000, timeout:20000 });
+}
+function stopRecording(save=true){
+  state.recording = false;
+  if(state.watchId != null){ navigator.geolocation.clearWatch(state.watchId); state.watchId = null; }
+  document.getElementById('btnRec').disabled = false;
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('live').classList.remove('on');
+  renderRoute(state.points);
+  if(save) saveActivity();
+}
+async function fillElevation(pts){
+  if(!pts.length) return pts;
+  const out = pts.map(p=>({...p}));
+  const chunks = [];
+  for(let i=0;i<out.length;i+=95) chunks.push(out.slice(i,i+95));
+  let idx = 0;
+  for(const ch of chunks){
+    try{
+      const lats = ch.map(p=>p.lat.toFixed(5)).join(',');
+      const lons = ch.map(p=>p.lon.toFixed(5)).join(',');
+      const r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lons}`);
+      const j = await r.json();
+      j.elevation.forEach(e=>{ out[idx].ele = e; idx++; });
+    }catch(e){ idx += ch.length; }
+  }
+  return out;
+}
+async function saveActivity(){
+  if(state.points.length < 4){ toast('Data terlalu sedikit untuk disimpan.'); return; }
+  toast('Mengambil elevasi dari Open-Meteo…');
+  if(state.points.some(p=>!p.ele)) state.points = await fillElevation(state.points);
+  const st = computeStats(state.points);
+  const list = loadList();
+  list.unshift({
+    name: state.sessionName || 'Aktivitas',
+    mode: state.mode,
+    dist: st.dist, dur: st.dur, gain: st.gain, vmax: st.vmax,
+    date: new Date().toLocaleString('id-ID'),
+    pts: state.points.map(p=>[+p.lon.toFixed(5), +p.lat.toFixed(5), Math.round(p.ele||0)])
+  });
+  localStorage.setItem('jejak.acts', JSON.stringify(list.slice(0,30)));
+  renderList();
+  toast('Aktivitas tersimpan di browser kamu.');
+}
+function loadList(){
+  try{ return JSON.parse(localStorage.getItem('jejak.acts') || '[]'); }catch(e){ return []; }
+}
+function renderList(){
+  const el = document.getElementById('acts');
+  const list = loadList();
+  if(!list.length){ el.innerHTML = '<div class="empty">Belum ada aktivitas tersimpan.</div>'; return; }
+  el.innerHTML = list.map((a,i)=>`<div class="actcard" data-i="${i}">
+      <div class="t1">${a.name}</div>
+      <div class="t2">${(a.dist/1000).toFixed(2)} km · ${fmtDur(a.dur)} · naik ${Math.round(a.gain)} m · ${a.date}</div>
+    </div>`).join('');
+  el.querySelectorAll('.actcard').forEach(c=> c.onclick = ()=>{
+    const a = loadList()[+c.dataset.i];
+    state.mode = a.mode || 'ride';
+    [...document.getElementById('seg').children].forEach(b=> b.classList.toggle('on', b.dataset.mode===state.mode));
+    state.sessionName = a.name;
+    document.getElementById('sessionName').textContent = '· ' + a.name;
+    let t = 0; const pts = a.pts.map((p,i)=>{ if(i) t += 0; return { lon:p[0], lat:p[1], ele:p[2], t:0 }; });
+    // re-simulasikan waktu supaya split & kecepatan masuk akal
+    const M = MODE[state.mode];
+    for(let i=1;i<pts.length;i++){
+      const d = haversine(pts[i-1],pts[i]);
+      const grad = d>0 ? (pts[i].ele-pts[i-1].ele)/d : 0;
+      pts[i].t = pts[i-1].t + d / Math.max(0.6, M.base * clamp(1-2.6*grad,0.42,1.75));
+    }
+    state.points = pts;
+    renderRoute(pts);
+    map.fitBounds(boundsOf(pts), { padding:{top:80,bottom:80,left:400,right:80}, pitch:50, duration:900 });
+    updateStats();
+    toast('Memuat: ' + a.name);
+  });
+}
+
+/* ---------------- EVENTS ---------------- */
+document.getElementById('btnRec').onclick = startRecording;
+document.getElementById('btnStop').onclick = ()=> stopRecording(true);
+document.getElementById('btnDemo').onclick = ()=>{
+  const keys = Object.keys(SAMPLES);
+  const key = keys[0];
+  toast('Memutar contoh rute: ' + SAMPLES[key].name);
+  loadSample(key, { animate:true });
+};
+
+/* ---------------- BOOT ---------------- */
+function boot(){
+  if(booted || !layersReady) return;
+  booted = true;
+  renderList();
+  loadSample(Object.keys(SAMPLES)[0]);
+}
+boot();
+</script>
+</body>
+</html>
